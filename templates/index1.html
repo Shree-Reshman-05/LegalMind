@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome | LegalMind AI</title>
+
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='law.png') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Merriweather:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='welcome.css') }}">
+</head>
+
+
+<body class="theme-obsidian">
+
+  <div class="welcome-container" id="welcomeScreen">
+    <div class="welcome-card">
+
+      <!-- LOGO  -->
+      <img src="{{ url_for('static', filename='law.png') }}" class="welcome-logo">
+
+      <h1>LegalMind AI</h1>
+
+      <p class="subtitle">
+        Intelligent Legal Research 
+      </p>
+
+      <!-- RAG STATUS -->
+      <div class="rag-status">  
+        <span class="rag-dot"></span>
+        <span id="ragText">Powered By RAG</span>
+      </div>
+
+      <!-- THEME SELECTION -->
+      <div class="theme-select">
+        <p>Select your workspace theme</p>
+        <div class="theme-options">
+          <button class="theme-circle dark" onclick="selectTheme('obsidian')"></button>
+          <button class="theme-circle slate" onclick="selectTheme('slate')"></button>
+          <button class="theme-circle light" onclick="selectTheme('paper')"></button>
+        </div>
+      </div>
+
+      <!-- ENTER BUTTON -->
+      <button class="enter-btn" onclick="enterApp()">
+        Enter LegalMind →
+      </button>
+
+      <div class="footer-note">
+        Secure • Private • Professional
+      </div>
+
+    </div>
+  </div>
+
+<script>
+let selectedTheme = localStorage.getItem('legalMindTheme') || 'obsidian';
+document.body.className = `theme-${selectedTheme}`;
+markActiveTheme();
+
+function selectTheme(theme) {
+  selectedTheme = theme;
+  document.body.className = `theme-${theme}`;
+  localStorage.setItem('legalMindTheme', theme);
+  markActiveTheme();
+}
+
+function markActiveTheme() {
+  document.querySelectorAll('.theme-circle').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.querySelector(`.theme-circle.${selectedTheme === 'paper' ? 'light' : selectedTheme}`)?.classList.add('active');
+}
+
+function enterApp() {
+  document.getElementById("ragText").textContent = "Entering Workspace…";
+  document.getElementById("welcomeScreen").classList.add("fade-out");
+  setTimeout(() => {
+    window.location.href = "/chatbot";
+  }, 900);
+}
+</script>
+
+</body>
+</html>

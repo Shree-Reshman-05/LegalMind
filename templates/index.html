@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>LegalMind AI - RAG Chatbot</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='law.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body class="theme-obsidian">
+
+<!-- Mobile Header (hidden on desktop) -->
+<header class="mobile-header">
+    <button class="mobile-menu-btn" id="mobileMenuBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+    </button>
+    <div class="mobile-header-title">
+        <img src="{{ url_for('static', filename='law.png') }}" class="brand-logo">
+        <span>LegalMind</span>
+    </div>
+    <button class="mobile-new-chat" onclick="newChat()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+    </button>
+</header>
+
+<!-- Sidebar Overlay (mobile only) -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="app-container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+        <button class="mobile-close-btn" id="mobileCloseBtn">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+        
+        <div class="sidebar-header">
+            <div class="brand">
+                <img src="{{ url_for('static', filename='law.png') }}" class="brand-logo">
+                <span>LegalMind</span>
+            </div>
+        </div>
+
+        <button class="new-chat-btn" onclick="newChat()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            New Context
+        </button>
+
+        <div class="nav-section">
+            <div class="nav-label">Chat History</div>
+            <ul class="chat-history" id="chatHistory">
+                <!-- Chat history will be populated here -->
+            </ul>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="nav-label">Theme</div>
+            <div class="theme-buttons">
+                <button class="theme-btn dark" onclick="setTheme('obsidian')" title="Dark Theme"></button>
+                <button class="theme-btn grey" onclick="setTheme('slate')" title="Slate Theme"></button>
+                <button class="theme-btn light" onclick="setTheme('paper')" title="Light Theme"></button>
+            </div>
+
+            <div class="user-profile">
+                <div class="avatar">LM</div>
+                <div class="user-info">
+                    <span class="name">Legal Professional</span>
+                    <span class="plan">RAG Enabled</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CHAT AREA -->
+    <main class="main-chat">
+        <div class="chat-stream" id="chatStream">
+            <!-- Welcome Message -->
+            <div class="message bot-message">
+                <div class="avatar" width="20px">
+                    <img src="{{ url_for('static', filename='legal.png') }}">
+                </div>
+                <div class="content">
+                    <strong>Welcome to LegalMind AI</strong><br><br>
+                    I'm your legal document assistant powered by RAG . 
+                    .<br><br>
+                    <em>Ask me anything about your legal documents!</em>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area-wrapper">
+            <div class="input-container">
+                <textarea 
+                    id="userInput" 
+                    placeholder="Ask a question about your legal documents..." 
+                    rows="1"
+                    oninput="autoResize(this)"
+                ></textarea>
+                <button id="sendBtn" onclick="sendMessage()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="19" x2="12" y2="5"></line>
+                        <polyline points="5 12 12 5 19 12"></polyline>
+                    </svg>
+                </button>
+            </div>
+            <p class="disclaimer">
+                AI responses are based on retrieved document chunks. Always verify with original sources.
+            </p>
+        </div>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+</body>
+</html>
