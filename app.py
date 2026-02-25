@@ -1062,4 +1062,5 @@ if __name__ == "__main__":
     print(f"   ✓ Balanced thresholds (not too high, not too low)")
     print("="*70 + "\n")
 
-    app.run(debug=False, port=5000, host="0.0.0.0", threaded=True)
+    if __name__ == "__main__":
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
