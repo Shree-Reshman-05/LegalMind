@@ -8,7 +8,7 @@
     <title>LegalMind AI - RAG Chatbot</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='law.png') }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="static/style.css">
 </head>
 
 <body class="theme-obsidian">
@@ -23,7 +23,7 @@
         </svg>
     </button>
     <div class="mobile-header-title">
-        <img src="{{ url_for('static', filename='law.png') }}" class="brand-logo">
+        <img src="static/law.png" class="brand-logo">
         <span>LegalMind</span>
     </div>
     <button class="mobile-new-chat" onclick="newChat()">
@@ -126,7 +126,6 @@
     </main>
 </div>
 
-<script src="{{ url_for('static', filename='script.js') }}"></script>
-
+<script src="static/script.js"></script>
 </body>
 </html>
