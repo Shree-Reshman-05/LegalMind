@@ -90,9 +90,9 @@ sympy==1.13.1
 tenacity==9.1.2
 threadpoolctl==3.6.0
 tokenizers==0.22.2
-torch==2.5.1+cu121
-torchaudio==2.5.1+cu121
-torchvision==0.20.1+cu121
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
 tqdm==4.67.1
 transformers==5.0.0
 typer-slim==0.21.1
@@ -105,3 +105,5 @@ uuid_utils==0.14.0
 Werkzeug==3.1.5
 xxhash==3.6.0
 zstandard==0.25.0
+gunicorn
+
