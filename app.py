@@ -20,7 +20,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 from pypdf import PdfReader
 import pandas as pd
-import anthropic
+import google.generativeai as genai
 import openpyxl
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -44,11 +44,11 @@ CORS(app, supports_credentials=True)
 DATA_FOLDER = "data"
 CACHE_FOLDER = "cache"
 
-# Claude API setup
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
-anthropic_client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY")
-)
+# Google Gemini API setup
+GEMINI_MODEL = "gemini-3.1-flash-lite-preview"# fast & free tier friendly
+                                     # change to "gemini-1.5-pro" for best quality
+genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+gemini_model = genai.GenerativeModel(GEMINI_MODEL)
 
 # INTELLIGENT THRESHOLDS - Balanced for accuracy
 SIMILARITY_THRESHOLD = 0.08  # Very low for recall
@@ -57,7 +57,6 @@ ULTRA_FALLBACK = 0.06        # Last resort
 
 # Performance
 BATCH_SIZE = 64
-NUM_CTX = 4096
 MAX_CONVERSATION_HISTORY = 10
 
 # Chunking - Optimized for legal text
@@ -123,7 +122,7 @@ perf = PerformanceMonitor()
 # -----------------------------
 def rewrite_query_intelligent(query: str) -> str:
     """
-    Uses Claude to understand twisted/slang queries and convert to formal legal terms.
+    Uses Gemini to understand twisted/slang queries and convert to formal legal terms.
     """
     if len(query.split()) < 3:
         return query
@@ -131,18 +130,21 @@ def rewrite_query_intelligent(query: str) -> str:
     try:
         prompt = f"""You are a legal expert. Rewrite this user question into a formal legal search query.
 Focus on key legal terms, sections, and concepts. Keep it concise (under 15 words).
+Reply with ONLY the rewritten query, nothing else.
 
 User Question: "{query}"
 
 Formal Legal Query:"""
         
-        message = anthropic_client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=60,
-            messages=[{"role": "user", "content": prompt}]
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=60,
+                temperature=0.1,
+            )
         )
         
-        rewritten = message.content[0].text.strip()
+        rewritten = response.text.strip()
         rewritten = rewritten.replace('"', '').replace("'", "").strip()
         
         if rewritten and rewritten != query:
@@ -612,12 +614,12 @@ def initialize_system():
     global documents, doc_embeddings, doc_embeddings_np, embedder, reranker
 
     print("\n" + "="*70)
-    print("🚀 INTELLIGENT RAG SYSTEM - LEGAL AI (Claude API Edition)")
+    print("🚀 INTELLIGENT RAG SYSTEM - LEGAL AI (Google Gemini Edition)")
     print("="*70)
     
     # Verify API key exists
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("❌ ANTHROPIC_API_KEY not set! Add it to your environment variables.")
+    if not os.environ.get("GOOGLE_API_KEY"):
+        print("❌ GOOGLE_API_KEY not set! Add it to your environment variables.")
         return False
     
     load_embedding_cache()
@@ -791,7 +793,7 @@ def rag_query(question, session_id, top_k=7):
     
     # Smart re-rank
     ranked_indices, ranked_scores = rerank_results_smart(
-        question, 
+        question,
         candidate_indices,
         candidate_scores,
         top_k=top_k
@@ -842,7 +844,7 @@ def rag_query(question, session_id, top_k=7):
     conversation_context = format_conversation_context(session_id)
 
     prompt = f"""You are an expert legal assistant. Answer the question based ONLY on the provided legal information.
-
+Cite specific IPC sections when available. Mention punishments clearly. Be concise but complete. If unsure, say so.
 {conversation_context}
 
 LEGAL INFORMATION:
@@ -850,23 +852,19 @@ LEGAL INFORMATION:
 
 USER QUESTION: {question}
 
-INSTRUCTIONS:
-- Answer accurately and cite specific IPC sections when available
-- Mention the punishment clearly
-- Be concise but complete
-- If unsure, say so
-
 ANSWER:"""
 
     perf.start("llm")
     try:
-        message = anthropic_client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}]
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=600,
+                temperature=0.1,
+            )
         )
         
-        answer = message.content[0].text
+        answer = response.text
         perf.end("llm")
         
         result = {"answer": answer, "sources": sources}
@@ -886,7 +884,7 @@ ANSWER:"""
     except Exception as e:
         perf.end("llm")
         perf.end("total")
-        return {"answer": f"Error calling Claude API: {str(e)}", "sources": sources}
+        return {"answer": f"Error calling Gemini API: {str(e)}", "sources": sources}
 
 # -----------------------------
 # Routes
@@ -928,7 +926,7 @@ def status():
         "device": DEVICE,
         "documents": len(documents),
         "types": doc_types,
-        "model": CLAUDE_MODEL,
+        "model": GEMINI_MODEL,
         "cache_stats": cache_stats,
         "thresholds": {
             "similarity": SIMILARITY_THRESHOLD,
@@ -977,12 +975,12 @@ if __name__ == "__main__":
         exit(1)
 
     print("\n" + "="*70)
-    print("🚀 INTELLIGENT LEGAL RAG SYSTEM (Claude API Edition)")
+    print("🚀 INTELLIGENT LEGAL RAG SYSTEM (Google Gemini Edition)")
     print("="*70)
     print(f"📍 http://localhost:5000")
     print(f"⚡ {DEVICE}")
     print(f"📚 {len(documents)} chunks")
-    print(f"🤖 Model: {CLAUDE_MODEL}")
+    print(f"🤖 Model: {GEMINI_MODEL}")
     
     doc_types = {}
     for doc in documents:
@@ -993,7 +991,7 @@ if __name__ == "__main__":
         print(f"   • {dtype.upper()}: {count}")
     
     print(f"\n🧠 INTELLIGENCE FEATURES:")
-    print(f"   ✓ Claude API Query Rewriting (handles twisted questions)")
+    print(f"   ✓ Gemini Query Rewriting (handles twisted questions)")
     print(f"   ✓ Schema Detection (FIR/Q&A/Laws auto-detected)")
     print(f"   ✓ Section Number Extraction & Matching")
     print(f"   ✓ Smart Front-Loading (Punishment/Section first)")
