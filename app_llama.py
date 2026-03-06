@@ -20,22 +20,16 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 from pypdf import PdfReader
 import pandas as pd
-import anthropic
+import ollama
+import faiss
 import openpyxl
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-# Load .env file locally (ignored on Render/cloud)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
 
 # -----------------------------
 # Flask App
 # -----------------------------
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-fallback-key-change-in-prod")
+app.secret_key = 'legal-mind-secret-key-2025'
 CORS(app, supports_credentials=True)
 
 # -----------------------------
@@ -43,12 +37,7 @@ CORS(app, supports_credentials=True)
 # -----------------------------
 DATA_FOLDER = "data"
 CACHE_FOLDER = "cache"
-
-# Claude API setup
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
-anthropic_client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY")
-)
+MODEL_NAME = "llama3"
 
 # INTELLIGENT THRESHOLDS - Balanced for accuracy
 SIMILARITY_THRESHOLD = 0.08  # Very low for recall
@@ -70,19 +59,23 @@ USE_SEMANTIC_CACHE = True
 USE_EMBEDDING_CACHE = True
 
 # -----------------------------
-# CPU ONLY (cloud-safe)
+# GPU / CPU DEVICE
 # -----------------------------
-DEVICE = "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"🚀 Using device: {DEVICE}")
+if DEVICE == "cuda":
+    print(f"🟢 GPU detected: {torch.cuda.get_device_name(0)}")
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 # -----------------------------
 # Global variables
 # -----------------------------
 documents = []
 doc_embeddings = None
-doc_embeddings_np = None   # numpy version for cosine similarity
 embedder = None
 reranker = None
+faiss_index = None
 conversation_histories = {}
 
 semantic_cache = {}
@@ -97,6 +90,7 @@ os.makedirs(DATA_FOLDER, exist_ok=True)
 EMBEDDING_CACHE_FILE = os.path.join(CACHE_FOLDER, "embedding_cache.pkl")
 SEMANTIC_CACHE_FILE = os.path.join(CACHE_FOLDER, "semantic_cache.pkl")
 DOCUMENTS_CACHE_FILE = os.path.join(CACHE_FOLDER, "documents_cache.pkl")
+FAISS_INDEX_FILE = os.path.join(CACHE_FOLDER, "faiss_index.bin")
 
 # -----------------------------
 # Performance Monitoring
@@ -123,26 +117,33 @@ perf = PerformanceMonitor()
 # -----------------------------
 def rewrite_query_intelligent(query: str) -> str:
     """
-    Uses Claude to understand twisted/slang queries and convert to formal legal terms.
+    Uses LLM to understand twisted/slang queries and convert to formal legal terms.
+    This is THE KEY to handling natural language questions.
     """
+    # Skip for very short queries
     if len(query.split()) < 3:
         return query
     
     try:
         prompt = f"""You are a legal expert. Rewrite this user question into a formal legal search query.
-Focus on key legal terms, sections, and concepts. Keep it concise (under 15 words).
+Focus on key legal terms, sections, and concepts. Keep it concise.
 
 User Question: "{query}"
 
 Formal Legal Query:"""
         
-        message = anthropic_client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=60,
-            messages=[{"role": "user", "content": prompt}]
+        response = ollama.chat(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            options={
+                "num_predict": 40,
+                "temperature": 0.1,
+                "num_ctx": 512  # Small context for speed
+            }
         )
         
-        rewritten = message.content[0].text.strip()
+        rewritten = response["message"]["content"].strip()
+        # Clean up
         rewritten = rewritten.replace('"', '').replace("'", "").strip()
         
         if rewritten and rewritten != query:
@@ -160,11 +161,13 @@ def expand_query_smart(query: str) -> List[str]:
     """
     variations = [query, query.lower()]
     
+    # Get smart rewrite
     smart_query = rewrite_query_intelligent(query)
     if smart_query != query and smart_query not in variations:
         variations.append(smart_query)
         variations.append(smart_query.lower())
     
+    # Legal synonyms
     synonyms = {
         'punishment': ['penalty', 'sentence', 'imprisonment', 'fine', 'punishable'],
         'killed': ['murder', 'death', 'homicide', 'causing death', 'killing'],
@@ -178,25 +181,27 @@ def expand_query_smart(query: str) -> List[str]:
     query_lower = query.lower()
     for key, syns in synonyms.items():
         if key in query_lower:
-            for syn in syns[:3]:
+            for syn in syns[:3]:  # Top 3 synonyms only
                 variations.append(query_lower.replace(key, syn))
     
+    # Extract IPC section if mentioned
     section_match = re.search(r'(?:IPC|Section)\s*(\d+)', query, re.IGNORECASE)
     if section_match:
         section_num = section_match.group(1)
         variations.append(f"IPC Section {section_num}")
         variations.append(f"Section {section_num}")
     
-    return list(set(variations))[:20]
+    return list(set(variations))[:20]  # Max 20 variations
 
 # -----------------------------
-# SMART CSV PROCESSING
+# SMART CSV PROCESSING - The Accuracy Fix
 # -----------------------------
 class DocumentPreprocessor:
     """Handles different file formats with intelligence"""
     
     @staticmethod
     def clean_text(text: str) -> str:
+        """Clean and normalize text"""
         if not text:
             return ""
         text = re.sub(r'\s+', ' ', text)
@@ -204,10 +209,17 @@ class DocumentPreprocessor:
         return text
     
     def process_csv(self, filepath: str) -> List[Dict]:
+        """
+        INTELLIGENT CSV PROCESSING
+        - Detects schema (Q&A, FIR, Laws)
+        - Front-loads important info (Punishment, Section)
+        - Preserves section numbers for accuracy
+        """
         print(f"\n📊 Processing CSV: {os.path.basename(filepath)}")
         chunks = []
         
         try:
+            # Try multiple encodings
             df = None
             for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
                 try:
@@ -224,6 +236,7 @@ class DocumentPreprocessor:
             source = os.path.basename(filepath)
             columns_lower = [c.lower() for c in df.columns]
             
+            # Detect dataset type
             is_fir = any(col in columns_lower for col in ['punishment', 'offense', 'description'])
             is_qa = any(col in columns_lower for col in ['instruction', 'output'])
             is_laws = any(col in columns_lower for col in ['ipc chapter', 'ipc section'])
@@ -234,28 +247,34 @@ class DocumentPreprocessor:
                 content = ""
                 section_num = ""
                 
+                # STRATEGY 1: FIR Dataset (Offense/Punishment/Description)
                 if is_fir:
                     offense = str(row.get('Offense', '')).strip()
                     punishment = str(row.get('Punishment', '')).strip()
                     description = str(row.get('Description', '')).strip()
                     
+                    # Extract section from description
                     section_match = re.search(r'(?:IPC|Section)\s*(\d+)', description)
                     if section_match:
                         section_num = section_match.group(1)
                     
+                    # Truncate long descriptions
                     if len(description) > 1500:
                         description = description[:1500] + "..."
                     
+                    # FRONT-LOAD critical info
                     content = f"""IPC SECTION: {section_num if section_num else 'N/A'}
 OFFENSE: {offense}
 PUNISHMENT: {punishment}
 DETAILS: {description}"""
                 
+                # STRATEGY 2: Laws Dataset (instruction/input/output)
                 elif is_qa:
                     instruction = str(row.get('instruction', '')).strip()
                     input_text = str(row.get('input', '')).strip()
                     output = str(row.get('output', '')).strip()
                     
+                    # Extract section number
                     section_match = re.search(r'(?:IPC|Section)\s*(\d+)', instruction + input_text)
                     if section_match:
                         section_num = section_match.group(1)
@@ -266,11 +285,13 @@ DETAILS: {description}"""
 TOPIC: {question}
 LAW: {output}"""
                 
+                # STRATEGY 3: Constitution Dataset (IPC Chapter/Section)
                 elif is_laws:
                     chapter = str(row.get('IPC Chapter', '')).strip()
                     section = str(row.get('IPC Section', '')).strip()
                     details = str(row.get('Details', '')).strip()
                     
+                    # Extract section number
                     section_match = re.search(r'(\d+)', section)
                     if section_match:
                         section_num = section_match.group(1)
@@ -279,6 +300,7 @@ LAW: {output}"""
 CHAPTER: {chapter}
 DETAILS: {details}"""
                 
+                # STRATEGY 4: Generic
                 else:
                     parts = []
                     for col, val in row.items():
@@ -286,10 +308,11 @@ DETAILS: {details}"""
                             parts.append(f"{col}: {val}")
                     content = " | ".join(parts)
                 
+                # Only add if meaningful content
                 if content.strip() and len(content) > MIN_CHUNK_SIZE:
                     chunks.append({
                         "content": self.clean_text(content),
-                        "section": section_num,
+                        "section": section_num,  # Store for accuracy
                         "type": "csv_intelligent",
                         "source": f"{source} (Row {idx + 1})",
                         "char_count": len(content)
@@ -303,6 +326,7 @@ DETAILS: {details}"""
         return chunks
     
     def process_json(self, filepath: str) -> List[Dict]:
+        """Process JSON files"""
         print(f"\n📋 Processing JSON: {os.path.basename(filepath)}")
         chunks = []
         
@@ -334,6 +358,7 @@ DETAILS: {details}"""
         return chunks
     
     def process_pdf(self, filepath: str) -> List[Dict]:
+        """Process PDF files"""
         print(f"\n📄 Processing PDF: {os.path.basename(filepath)}")
         chunks = []
         
@@ -348,6 +373,7 @@ DETAILS: {details}"""
             
             full_text = self.clean_text(full_text)
             
+            # Chunk with LangChain
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=CHUNK_SIZE,
                 chunk_overlap=CHUNK_OVERLAP
@@ -531,6 +557,7 @@ def format_conversation_context(session_id):
 # Load Documents
 # -----------------------------
 def load_documents(folder=DATA_FOLDER):
+    """Load all documents"""
     docs = []
 
     if not os.path.exists(folder):
@@ -565,6 +592,7 @@ def load_documents(folder=DATA_FOLDER):
             elif ext == '.pdf':
                 chunks = preprocessor.process_pdf(filepath)
                 docs.extend(chunks)
+
         except Exception as e:
             print(f"❌ Error processing {file}: {e}")
 
@@ -575,16 +603,39 @@ def load_documents(folder=DATA_FOLDER):
     return docs
 
 # -----------------------------
-# NumPy Index (replaces FAISS)
+# FAISS Index
 # -----------------------------
-def create_numpy_index(embeddings):
-    global doc_embeddings_np
+def create_faiss_index(embeddings):
+    global faiss_index
+    
     if torch.is_tensor(embeddings):
-        doc_embeddings_np = embeddings.cpu().numpy().astype('float32')
+        embeddings_np = embeddings.cpu().numpy().astype('float32')
     else:
-        doc_embeddings_np = np.array(embeddings).astype('float32')
-    print(f"  ✅ NumPy index ({len(doc_embeddings_np)} vectors, dim={doc_embeddings_np.shape[1]})")
+        embeddings_np = np.array(embeddings).astype('float32')
+    
+    dimension = embeddings_np.shape[1]
+    
+    # Use Inner Product (cosine similarity) for better semantic matching
+    faiss_index = faiss.IndexFlatIP(dimension)
+    faiss_index.add(embeddings_np)
+    
+    print(f"  ✅ FAISS index ({len(embeddings_np)} vectors, dim={dimension})")
 
+def save_faiss_index():
+    if faiss_index is not None:
+        faiss.write_index(faiss_index, FAISS_INDEX_FILE)
+
+def load_faiss_index():
+    global faiss_index
+    if os.path.exists(FAISS_INDEX_FILE):
+        faiss_index = faiss.read_index(FAISS_INDEX_FILE)
+        print(f"  📂 Loaded FAISS index")
+        return True
+    return False
+
+# -----------------------------
+# Cache Management
+# -----------------------------
 def save_documents_cache():
     cache_data = {
         "documents": documents,
@@ -594,13 +645,12 @@ def save_documents_cache():
         pickle.dump(cache_data, f)
 
 def load_documents_cache():
-    global documents, doc_embeddings, doc_embeddings_np
+    global documents, doc_embeddings
     if os.path.exists(DOCUMENTS_CACHE_FILE):
         with open(DOCUMENTS_CACHE_FILE, 'rb') as f:
             cache_data = pickle.load(f)
             documents = cache_data["documents"]
             doc_embeddings = torch.from_numpy(cache_data["embeddings"]).to(DEVICE)
-            doc_embeddings_np = cache_data["embeddings"].astype('float32')
         print(f"  📂 Loaded docs ({len(documents)})")
         return True
     return False
@@ -609,34 +659,29 @@ def load_documents_cache():
 # Initialize System
 # -----------------------------
 def initialize_system():
-    global documents, doc_embeddings, doc_embeddings_np, embedder, reranker
+    global documents, doc_embeddings, embedder, reranker, faiss_index
 
     print("\n" + "="*70)
-    print("🚀 INTELLIGENT RAG SYSTEM - LEGAL AI (Claude API Edition)")
+    print("🚀 INTELLIGENT RAG SYSTEM - LEGAL AI")
     print("="*70)
-    
-    # Verify API key exists
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("❌ ANTHROPIC_API_KEY not set! Add it to your environment variables.")
-        return False
     
     load_embedding_cache()
     if semantic_cache_system:
         semantic_cache_system.load(SEMANTIC_CACHE_FILE)
     
-    if load_documents_cache():
+    if load_documents_cache() and load_faiss_index():
         print("  ✅ Loaded from cache!")
     else:
         print("\n  🔄 Processing with intelligence...")
         documents = load_documents()
         
         if not documents:
-            print("⚠️ No documents found in data/ folder!")
+            print("⚠️ No documents!")
             return False
         
         print(f"\n✅ Total: {len(documents)}")
         
-        print("\n🧠 Loading embedding model...")
+        print("\n🧠 Loading models...")
         embedder = SentenceTransformer("all-MiniLM-L6-v2", device=DEVICE)
         embedder.eval()
         
@@ -653,17 +698,15 @@ def initialize_system():
                 normalize_embeddings=True
             )
         
-        print("\n⚡ Creating NumPy index...")
-        create_numpy_index(doc_embeddings)
+        print("\n⚡ Creating FAISS index...")
+        create_faiss_index(doc_embeddings)
         
         save_documents_cache()
+        save_faiss_index()
     
     if embedder is None:
         embedder = SentenceTransformer("all-MiniLM-L6-v2", device=DEVICE)
         embedder.eval()
-    
-    if doc_embeddings_np is None and doc_embeddings is not None:
-        doc_embeddings_np = doc_embeddings.cpu().numpy().astype('float32')
     
     print("🎯 Loading re-ranker...")
     reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device=DEVICE)
@@ -676,11 +719,16 @@ def initialize_system():
 # INTELLIGENT HYBRID SEARCH
 # -----------------------------
 def hybrid_search_intelligent(query, top_k=30):
+    """
+    Combines semantic search with keyword matching and section number extraction.
+    """
     perf.start("search")
     
+    # Get smart query variations
     query_variations = expand_query_smart(query)
     print(f"  🔍 Searching with {len(query_variations)} variations")
     
+    # Get embeddings
     all_embeddings = []
     for q_var in query_variations:
         q_embedding = get_cached_embedding(q_var, embedder)
@@ -688,56 +736,59 @@ def hybrid_search_intelligent(query, top_k=30):
     
     avg_embedding = np.mean(all_embeddings, axis=0).astype('float32')
     
-    # NumPy cosine similarity (replaces FAISS)
-    similarities = cosine_similarity(
-        avg_embedding.reshape(1, -1), doc_embeddings_np
-    )[0]
-    
-    top_indices_sorted = np.argsort(similarities)[::-1][:top_k]
-    semantic_scores = similarities[top_indices_sorted]
+    # FAISS search
+    distances, indices = faiss_index.search(avg_embedding.reshape(1, -1), top_k)
+    semantic_scores = distances[0]  # Already normalized with IndexFlatIP
     
     # Keyword matching
     query_lower = query.lower()
     query_words = set(query_lower.split())
     
+    # Extract section number if present
     query_section = None
     section_match = re.search(r'(?:IPC|Section)\s*(\d+)', query, re.IGNORECASE)
     if section_match:
         query_section = section_match.group(1)
         print(f"  🎯 Detected Section: {query_section}")
     
-    keyword_boost = np.zeros(len(top_indices_sorted))
-    for i, idx in enumerate(top_indices_sorted):
+    keyword_boost = np.zeros(len(indices[0]))
+    for i, idx in enumerate(indices[0]):
         doc = documents[idx]
         content_lower = doc["content"].lower()
         
         boost = 0
         
+        # CRITICAL: Section number exact match gets HUGE boost
         if query_section and doc.get("section") == query_section:
             boost += 5.0
             print(f"  ✓ Exact section match: {doc.get('section')}")
         
+        # Exact phrase match
         if query_lower in content_lower:
             boost += 1.5
         
+        # Word overlap
         for word in query_words:
             if len(word) > 2 and word in content_lower:
                 boost += 0.4
         
         keyword_boost[i] = boost
     
+    # WEIGHTS: 60% semantic + 40% keyword (balanced)
     combined_scores = semantic_scores * 0.6 + keyword_boost * 0.4
     
     perf.end("search")
     
-    return top_indices_sorted, combined_scores
+    return indices[0], combined_scores
 
 # -----------------------------
 # Re-ranking with Intelligence
 # -----------------------------
 def rerank_results_smart(query, candidate_indices, candidate_scores, top_k=10):
+    """Smart re-ranking that preserves section accuracy"""
     perf.start("rerank")
     
+    # Extract section from query
     query_section = None
     section_match = re.search(r'(?:IPC|Section)\s*(\d+)', query, re.IGNORECASE)
     if section_match:
@@ -748,10 +799,11 @@ def rerank_results_smart(query, candidate_indices, candidate_scores, top_k=10):
     pairs = [[query, documents[idx]["content"][:800]] for idx in candidate_indices[:rerank_count]]
     rerank_scores = reranker.predict(pairs)
     
+    # Apply section boost to rerank scores
     if query_section:
         for i, idx in enumerate(candidate_indices[:rerank_count]):
             if documents[idx].get("section") == query_section:
-                rerank_scores[i] += 0.3
+                rerank_scores[i] += 0.3  # Boost section matches
     
     if rerank_count < len(candidate_indices):
         rerank_scores = np.concatenate([
@@ -759,6 +811,7 @@ def rerank_results_smart(query, candidate_indices, candidate_scores, top_k=10):
             candidate_scores[rerank_count:] * 0.2
         ])
     
+    # 70% rerank + 30% initial
     final_scores = 0.7 * rerank_scores + 0.3 * candidate_scores
     sorted_indices = np.argsort(final_scores)[::-1]
     
@@ -770,7 +823,7 @@ def rerank_results_smart(query, candidate_indices, candidate_scores, top_k=10):
 # RAG Query
 # -----------------------------
 def rag_query(question, session_id, top_k=7):
-    if embedder is None or doc_embeddings_np is None:
+    if embedder is None or faiss_index is None:
         return {"answer": "System not initialized.", "sources": []}
 
     perf.start("total")
@@ -860,19 +913,23 @@ ANSWER:"""
 
     perf.start("llm")
     try:
-        message = anthropic_client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}]
+        response = ollama.chat(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            options={
+                "num_ctx": NUM_CTX,
+                "num_predict": 500,
+                "temperature": 0.1,
+                "num_thread": os.cpu_count(),
+            }
         )
         
-        answer = message.content[0].text
+        answer = response["message"]["content"]
         perf.end("llm")
         
         result = {"answer": answer, "sources": sources}
         
         if semantic_cache_system:
-            query_embedding = get_cached_embedding(question, embedder)
             semantic_cache_system.set(query_embedding, answer, sources)
         
         add_to_conversation(session_id, question, answer)
@@ -886,18 +943,18 @@ ANSWER:"""
     except Exception as e:
         perf.end("llm")
         perf.end("total")
-        return {"answer": f"Error calling Claude API: {str(e)}", "sources": sources}
+        return {"answer": f"Error: {str(e)}", "sources": sources}
 
 # -----------------------------
 # Routes
 # -----------------------------
 @app.route("/")
 def welcome():
-    return render_template("index1.html")
-
+    return render_template("index1.html") 
 @app.route("/chatbot")
 def chatbot():
     return render_template("index.html")
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -928,7 +985,7 @@ def status():
         "device": DEVICE,
         "documents": len(documents),
         "types": doc_types,
-        "model": CLAUDE_MODEL,
+        "model": MODEL_NAME,
         "cache_stats": cache_stats,
         "thresholds": {
             "similarity": SIMILARITY_THRESHOLD,
@@ -977,12 +1034,11 @@ if __name__ == "__main__":
         exit(1)
 
     print("\n" + "="*70)
-    print("🚀 INTELLIGENT LEGAL RAG SYSTEM (Claude API Edition)")
+    print("🚀 INTELLIGENT LEGAL RAG SYSTEM")
     print("="*70)
     print(f"📍 http://localhost:5000")
     print(f"⚡ {DEVICE}")
     print(f"📚 {len(documents)} chunks")
-    print(f"🤖 Model: {CLAUDE_MODEL}")
     
     doc_types = {}
     for doc in documents:
@@ -993,12 +1049,18 @@ if __name__ == "__main__":
         print(f"   • {dtype.upper()}: {count}")
     
     print(f"\n🧠 INTELLIGENCE FEATURES:")
-    print(f"   ✓ Claude API Query Rewriting (handles twisted questions)")
+    print(f"   ✓ LLM Query Rewriting (handles twisted questions)")
     print(f"   ✓ Schema Detection (FIR/Q&A/Laws auto-detected)")
     print(f"   ✓ Section Number Extraction & Matching")
     print(f"   ✓ Smart Front-Loading (Punishment/Section first)")
     print(f"   ✓ Intelligent Re-ranking")
     print(f"   ✓ 20 Query variations with legal synonyms")
+    
+    print(f"\n⚡ ACCURACY FIXES:")
+    print(f"   ✓ Section-specific matching (IPC 122 ≠ IPC 123)")
+    print(f"   ✓ Keyword boost for exact section matches (5x)")
+    print(f"   ✓ Balanced thresholds (not too high, not too low)")
     print("="*70 + "\n")
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    if __name__ == "__main__":
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
