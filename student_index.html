@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>LegalMind – Student Mode</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="static/student_style.css">
+</head>
+<body class="theme-obsidian">
+
+<!-- ── MOBILE HEADER ── -->
+<header class="mobile-header">
+    <button class="mobile-menu-btn" id="mobileMenuBtn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+    </button>
+    <div class="mobile-brand">⚖️ LegalMind</div>
+    <div class="mobile-pts" id="mobilePts">0 pts</div>
+</header>
+
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="app-container">
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar" id="sidebar">
+        <button class="mobile-close-btn" id="mobileCloseBtn">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </button>
+
+        <div class="sidebar-brand">
+            <div class="brand-icon">⚖️</div>
+            <div>
+                <div class="brand-name">LegalMind</div>
+                <div class="brand-tagline">Student Mode</div>
+            </div>
+        </div>
+
+        <!-- XP Bar -->
+        <div class="xp-card">
+            <div class="xp-top">
+                <span class="xp-level" id="sidebarLevel">Beginner</span>
+                <span class="xp-pts" id="sidebarPts">0 pts</span>
+            </div>
+            <div class="xp-bar">
+                <div class="xp-fill" id="xpFill" style="width:0%"></div>
+            </div>
+            <div class="xp-streak">🔥 <span id="streakCount">0</span> day streak</div>
+        </div>
+
+        <!-- Nav -->
+        <nav class="sidebar-nav">
+            <button class="nav-item active" data-view="dashboard" onclick="navigate('dashboard')">
+                <span class="nav-icon">🏠</span> Dashboard
+            </button>
+            <button class="nav-item" data-view="learn" onclick="navigate('learn')">
+                <span class="nav-icon">📘</span> Learn
+            </button>
+            <button class="nav-item" data-view="cases" onclick="navigate('cases')">
+                <span class="nav-icon">⚖️</span> Case Studies
+            </button>
+            <button class="nav-item" data-view="quiz" onclick="navigate('quiz')">
+                <span class="nav-icon">🧩</span> Quiz
+            </button>
+            <button class="nav-item" data-view="daily" onclick="navigate('daily')">
+                <span class="nav-icon">🔥</span> Daily Challenge
+            </button>
+            <button class="nav-item" data-view="progress" onclick="navigate('progress')">
+                <span class="nav-icon">📊</span> Progress
+            </button>
+        </nav>
+
+        <!-- Theme -->
+        <div class="sidebar-footer">
+            <div class="nav-label">Theme</div>
+            <div class="theme-row">
+                <button class="theme-dot dark" onclick="setTheme('obsidian')" title="Obsidian"></button>
+                <button class="theme-dot slate" onclick="setTheme('slate')" title="Slate"></button>
+                <button class="theme-dot paper" onclick="setTheme('paper')" title="Paper"></button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── MAIN ── -->
+    <main class="main-content" id="mainContent">
+
+        <!-- ═══ DASHBOARD ═══ -->
+        <section class="view active" id="view-dashboard">
+            <div class="view-header">
+                <div>
+                    <h1 class="view-title">Good day, Counsellor 👋</h1>
+                    <p class="view-sub">Your legal journey continues. Keep the momentum.</p>
+                </div>
+            </div>
+
+            <div class="stat-grid" id="dashStats">
+                <div class="stat-card">
+                    <div class="stat-icon">📘</div>
+                    <div class="stat-val" id="statTopics">0/5</div>
+                    <div class="stat-label">Topics</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⚖️</div>
+                    <div class="stat-val" id="statCases">0%</div>
+                    <div class="stat-label">Case Accuracy</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🧩</div>
+                    <div class="stat-val" id="statQuiz">0%</div>
+                    <div class="stat-label">Quiz Avg</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🔥</div>
+                    <div class="stat-val" id="statStreak">0</div>
+                    <div class="stat-label">Day Streak</div>
+                </div>
+            </div>
+
+            <!-- Daily Challenge Teaser -->
+            <div class="section-heading">Today's Challenge</div>
+            <div class="daily-teaser" id="dashDaily" onclick="navigate('daily')">
+                <div class="teaser-icon">⚡</div>
+                <div class="teaser-body">
+                    <div class="teaser-title">Daily Legal Challenge</div>
+                    <div class="teaser-sub">Earn 50 points. Extend your streak.</div>
+                </div>
+                <div class="teaser-arrow">→</div>
+            </div>
+
+            <!-- Recent Topics -->
+            <div class="section-heading">Continue Learning</div>
+            <div class="topic-cards" id="dashTopics"></div>
+
+            <!-- Badges -->
+            <div class="section-heading">Your Badges</div>
+            <div class="badges-row" id="dashBadges"></div>
+        </section>
+
+        <!-- ═══ LEARN ═══ -->
+        <section class="view" id="view-learn">
+            <div class="view-header">
+                <h1 class="view-title">Legal Concepts</h1>
+                <p class="view-sub">Master the law, one concept at a time.</p>
+            </div>
+
+            <div class="level-filter">
+                <button class="filter-btn active" data-filter="all" onclick="filterTopics('all')">All</button>
+                <button class="filter-btn" data-filter="Beginner" onclick="filterTopics('Beginner')">Beginner</button>
+                <button class="filter-btn" data-filter="Intermediate" onclick="filterTopics('Intermediate')">Intermediate</button>
+                <button class="filter-btn" data-filter="Advanced" onclick="filterTopics('Advanced')">Advanced</button>
+            </div>
+
+            <div class="topic-list" id="topicList"></div>
+        </section>
+
+        <!-- ─── TOPIC DETAIL (nested view) ─── -->
+        <section class="view" id="view-topic-detail">
+            <button class="back-btn" onclick="navigate('learn')">← Back to Topics</button>
+            <div id="topicDetailContent"></div>
+        </section>
+
+        <!-- ═══ CASES ═══ -->
+        <section class="view" id="view-cases">
+            <div class="view-header">
+                <h1 class="view-title">Case Studies</h1>
+                <p class="view-sub">Analyze real scenarios. Apply what you've learned.</p>
+            </div>
+            <div class="case-list" id="caseList"></div>
+        </section>
+
+        <!-- ─── CASE DETAIL ─── -->
+        <section class="view" id="view-case-detail">
+            <button class="back-btn" onclick="navigate('cases')">← Back to Cases</button>
+            <div id="caseDetailContent"></div>
+        </section>
+
+        <!-- ═══ QUIZ ═══ -->
+        <section class="view" id="view-quiz">
+            <div class="view-header">
+                <h1 class="view-title">Quiz Arena</h1>
+                <p class="view-sub">Test your knowledge. Earn points with every correct answer.</p>
+            </div>
+
+            <div id="quizSetup">
+                <div class="quiz-config">
+                    <div class="config-row">
+                        <label class="config-label">Topic</label>
+                        <select class="config-select" id="quizTopic">
+                            <option value="">All Topics</option>
+                            <option>Contract Law</option>
+                            <option>Criminal Law</option>
+                            <option>Constitutional Law</option>
+                            <option>Law of Torts</option>
+                            <option>Property Law</option>
+                        </select>
+                    </div>
+                    <div class="config-row">
+                        <label class="config-label">Difficulty</label>
+                        <select class="config-select" id="quizDifficulty">
+                            <option value="">All Levels</option>
+                            <option>Beginner</option>
+                            <option>Intermediate</option>
+                            <option>Advanced</option>
+                        </select>
+                    </div>
+                    <div class="config-row">
+                        <label class="config-label">Questions</label>
+                        <select class="config-select" id="quizCount">
+                            <option value="5">5 Questions</option>
+                            <option value="8">8 Questions</option>
+                            <option value="12">12 Questions</option>
+                        </select>
+                    </div>
+                    <button class="primary-btn" onclick="startQuiz()">Start Quiz →</button>
+                </div>
+            </div>
+
+            <div id="quizPlay" style="display:none"></div>
+            <div id="quizResult" style="display:none"></div>
+        </section>
+
+        <!-- ═══ DAILY CHALLENGE ═══ -->
+        <section class="view" id="view-daily">
+            <div class="view-header">
+                <h1 class="view-title">Daily Challenge ⚡</h1>
+                <p class="view-sub">One case a day. Keep the streak alive.</p>
+            </div>
+            <div id="dailyChallengeContent"></div>
+        </section>
+
+        <!-- ═══ PROGRESS ═══ -->
+        <section class="view" id="view-progress">
+            <div class="view-header">
+                <h1 class="view-title">Your Progress</h1>
+                <p class="view-sub">Track your legal education journey.</p>
+            </div>
+            <div id="progressContent"></div>
+        </section>
+
+    </main>
+</div>
+
+<!-- ── TOAST ── -->
+<div class="toast" id="toast"></div>
+
+<script src="static/student_script.js"></script>
+</body>
+</html>
